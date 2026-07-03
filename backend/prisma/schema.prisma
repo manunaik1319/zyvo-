@@ -1,0 +1,365 @@
+// This is your Prisma schema file for ZYVO - Study Hall Booking Platform
+// Learn more about it at: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────
+// ENUMS
+// ─────────────────────────────────────────────────
+
+enum Role {
+  USER
+  OWNER
+  ADMIN
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  REFUNDED
+  FAILED
+}
+
+enum PaymentMethod {
+  WALLET
+  CARD
+  UPI
+  NET_BANKING
+}
+
+enum SpaceCategory {
+  FOCUS_ROOM
+  CO_WORKING
+  MEETING_ROOM
+  CREATIVE_STUDIO
+  LIBRARY
+  PRIVATE_CABIN
+}
+
+enum SpaceStatus {
+  ACTIVE
+  INACTIVE
+  UNDER_MAINTENANCE
+  PENDING_APPROVAL
+}
+
+enum SeatStatus {
+  AVAILABLE
+  OCCUPIED
+  RESERVED
+  MAINTENANCE
+}
+
+enum NotificationType {
+  BOOKING_CONFIRMED
+  BOOKING_CANCELLED
+  BOOKING_REMINDER
+  SESSION_STARTED
+  SESSION_ENDING
+  PAYMENT_SUCCESS
+  PAYMENT_FAILED
+  REFUND_PROCESSED
+  COUPON_ADDED
+  REWARD_EARNED
+  SYSTEM
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+}
+
+// ─────────────────────────────────────────────────
+// USER
+// ─────────────────────────────────────────────────
+
+model User {
+  id              String    @id @default(uuid())
+  firebaseUid     String?   @unique @map("firebase_uid")
+  email           String    @unique
+  passwordHash    String?   @map("password_hash")
+  name            String
+  phone           String?
+  avatarUrl       String?   @map("avatar_url")
+  university      String?
+  bio             String?
+  role            Role      @default(USER)
+  isVerified      Boolean   @default(false) @map("is_verified")
+  isActive        Boolean   @default(true) @map("is_active")
+  referralCode    String?   @unique @map("referral_code")
+  referredById    String?   @map("referred_by_id")
+  totalHours      Float     @default(0) @map("total_hours")
+  rewardPoints    Int       @default(0) @map("reward_points")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  referredBy      User?           @relation("Referrals", fields: [referredById], references: [id])
+  referrals       User[]          @relation("Referrals")
+  bookings        Booking[]
+  reviews         Review[]
+  notifications   Notification[]
+  wallet          Wallet?
+  favorites       Favorite[]
+  studyHalls      StudyHall[]     @relation("OwnerStudyHalls")
+  sessions        Session[]
+
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────
+// STUDY HALL (SPACE / VENUE)
+// ─────────────────────────────────────────────────
+
+model StudyHall {
+  id              String        @id @default(uuid())
+  ownerId         String        @map("owner_id")
+  name            String
+  description     String?
+  category        SpaceCategory
+  status          SpaceStatus   @default(PENDING_APPROVAL)
+  address         String
+  city            String
+  state           String
+  pincode         String
+  latitude        Float
+  longitude       Float
+  pricePerHour    Float         @map("price_per_hour")
+  openingTime     String        @map("opening_time")   // "08:00"
+  closingTime     String        @map("closing_time")   // "22:00"
+  totalSeats      Int           @map("total_seats")
+  amenities       String[]      // wifi, ac, parking, printer, etc.
+  images          String[]      // Cloudinary URLs
+  coverImage      String?       @map("cover_image")
+  rating          Float         @default(0)
+  totalReviews    Int           @default(0) @map("total_reviews")
+  isInstantBook   Boolean       @default(true) @map("is_instant_book")
+  rules           String?
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  owner           User          @relation("OwnerStudyHalls", fields: [ownerId], references: [id])
+  seats           Seat[]
+  bookings        Booking[]
+  reviews         Review[]
+  favorites       Favorite[]
+
+  @@map("study_halls")
+}
+
+// ─────────────────────────────────────────────────
+// SEAT
+// ─────────────────────────────────────────────────
+
+model Seat {
+  id          String      @id @default(uuid())
+  studyHallId String      @map("study_hall_id")
+  seatNumber  String      @map("seat_number")  // "A1", "B2"
+  row         String?
+  column      Int?
+  status      SeatStatus  @default(AVAILABLE)
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  // Relations
+  studyHall   StudyHall   @relation(fields: [studyHallId], references: [id], onDelete: Cascade)
+  bookings    Booking[]
+
+  @@unique([studyHallId, seatNumber])
+  @@map("seats")
+}
+
+// ─────────────────────────────────────────────────
+// BOOKING
+// ─────────────────────────────────────────────────
+
+model Booking {
+  id              String          @id @default(uuid())
+  userId          String          @map("user_id")
+  studyHallId     String          @map("study_hall_id")
+  seatId          String          @map("seat_id")
+  date            DateTime        // booking date (date only)
+  startTime       String          @map("start_time")   // "09:00"
+  endTime         String          @map("end_time")     // "12:00"
+  durationHours   Float           @map("duration_hours")
+  status          BookingStatus   @default(PENDING)
+  paymentStatus   PaymentStatus   @default(PENDING)
+  paymentMethod   PaymentMethod?  @map("payment_method")
+  baseAmount      Float           @map("base_amount")
+  discountAmount  Float           @default(0) @map("discount_amount")
+  taxAmount       Float           @default(0) @map("tax_amount")
+  totalAmount     Float           @map("total_amount")
+  couponCode      String?         @map("coupon_code")
+  qrCode          String?         @map("qr_code")
+  checkInTime     DateTime?       @map("check_in_time")
+  checkOutTime    DateTime?       @map("check_out_time")
+  cancellationReason String?      @map("cancellation_reason")
+  refundAmount    Float?          @map("refund_amount")
+  notes           String?
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  // Relations
+  user            User            @relation(fields: [userId], references: [id])
+  studyHall       StudyHall       @relation(fields: [studyHallId], references: [id])
+  seat            Seat            @relation(fields: [seatId], references: [id])
+  session         Session?
+  transactions    WalletTransaction[]
+
+  @@map("bookings")
+}
+
+// ─────────────────────────────────────────────────
+// SESSION (Active Study Session)
+// ─────────────────────────────────────────────────
+
+model Session {
+  id              String    @id @default(uuid())
+  bookingId       String    @unique @map("booking_id")
+  userId          String    @map("user_id")
+  startedAt       DateTime  @default(now()) @map("started_at")
+  endedAt         DateTime? @map("ended_at")
+  extendedMinutes Int       @default(0) @map("extended_minutes")
+  isActive        Boolean   @default(true) @map("is_active")
+
+  // Relations
+  booking         Booking   @relation(fields: [bookingId], references: [id])
+  user            User      @relation(fields: [userId], references: [id])
+
+  @@map("sessions")
+}
+
+// ─────────────────────────────────────────────────
+// REVIEW
+// ─────────────────────────────────────────────────
+
+model Review {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  studyHallId String    @map("study_hall_id")
+  rating      Int       // 1–5
+  comment     String?
+  tags        String[]  // "quiet", "good wifi", etc.
+  isVerified  Boolean   @default(false) @map("is_verified") // only from actual bookings
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user        User      @relation(fields: [userId], references: [id])
+  studyHall   StudyHall @relation(fields: [studyHallId], references: [id])
+
+  @@unique([userId, studyHallId])
+  @@map("reviews")
+}
+
+// ─────────────────────────────────────────────────
+// NOTIFICATION
+// ─────────────────────────────────────────────────
+
+model Notification {
+  id          String            @id @default(uuid())
+  userId      String            @map("user_id")
+  type        NotificationType
+  title       String
+  body        String
+  data        Json?             // extra payload (bookingId, etc.)
+  isRead      Boolean           @default(false) @map("is_read")
+  createdAt   DateTime          @default(now()) @map("created_at")
+
+  // Relations
+  user        User              @relation(fields: [userId], references: [id])
+
+  @@map("notifications")
+}
+
+// ─────────────────────────────────────────────────
+// WALLET
+// ─────────────────────────────────────────────────
+
+model Wallet {
+  id          String    @id @default(uuid())
+  userId      String    @unique @map("user_id")
+  balance     Float     @default(0)
+  currency    String    @default("INR")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  user        User      @relation(fields: [userId], references: [id])
+  transactions WalletTransaction[]
+
+  @@map("wallets")
+}
+
+model WalletTransaction {
+  id              String          @id @default(uuid())
+  walletId        String          @map("wallet_id")
+  bookingId       String?         @map("booking_id")
+  type            TransactionType
+  amount          Float
+  description     String
+  balanceBefore   Float           @map("balance_before")
+  balanceAfter    Float           @map("balance_after")
+  createdAt       DateTime        @default(now()) @map("created_at")
+
+  // Relations
+  wallet          Wallet          @relation(fields: [walletId], references: [id])
+  booking         Booking?        @relation(fields: [bookingId], references: [id])
+
+  @@map("wallet_transactions")
+}
+
+// ─────────────────────────────────────────────────
+// COUPON
+// ─────────────────────────────────────────────────
+
+model Coupon {
+  id              String    @id @default(uuid())
+  code            String    @unique
+  description     String?
+  discountType    String    @map("discount_type")  // "PERCENT" or "FLAT"
+  discountValue   Float     @map("discount_value")
+  minOrderAmount  Float?    @map("min_order_amount")
+  maxDiscount     Float?    @map("max_discount")
+  usageLimit      Int?      @map("usage_limit")
+  usedCount       Int       @default(0) @map("used_count")
+  isActive        Boolean   @default(true) @map("is_active")
+  expiresAt       DateTime? @map("expires_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@map("coupons")
+}
+
+// ─────────────────────────────────────────────────
+// FAVORITE
+// ─────────────────────────────────────────────────
+
+model Favorite {
+  id          String    @id @default(uuid())
+  userId      String    @map("user_id")
+  studyHallId String    @map("study_hall_id")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  user        User      @relation(fields: [userId], references: [id])
+  studyHall   StudyHall @relation(fields: [studyHallId], references: [id])
+
+  @@unique([userId, studyHallId])
+  @@map("favorites")
+}
